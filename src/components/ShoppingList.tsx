@@ -18,6 +18,12 @@ export default function ShoppingList() {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
+  if (!currentUser) {
+    alert('Auth session missing!');
+    navigate('/login');
+    return;
+  }
+
   useEffect(() => {
     if (!currentUser) {
       navigate('/');

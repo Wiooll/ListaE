@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { supabase } from '../lib/supabase';
+import { db } from '../lib/db';
 import type { ShoppingList, ListItem, ListStats } from '../types';
 
 interface ListState {
@@ -11,8 +11,8 @@ interface ListState {
   stats: ListStats;
   isLoading: boolean;
   error: string | null;
-  fetchLists: () => Promise<void>;
-  createList: (name: string, budget: number) => Promise<void>;
+  fetchLists: (userId: string) => Promise<void>;
+  createList: (name: string, budget: number, userId: string) => Promise<void>;
   deleteList: (id: string) => Promise<void>;
   setCurrentList: (list: ShoppingList | null) => void;
   fetchItems: (listId: string) => Promise<void>;
@@ -37,16 +37,15 @@ export const useListStore = create<ListState>()(
       isLoading: false,
       error: null,
 
-      fetchLists: async () => {
+      fetchLists: async (userId: string) => {
         set({ isLoading: true, error: null });
         try {
-          const { data, error } = await supabase
-            .from('shopping_lists')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-          if (error) throw error;
-          set({ lists: data || [] });
+          const lists = await db.shoppingLists
+            .where('user_id')
+            .equals(userId)
+            .reverse()
+            .sortBy('created_at');
+          set({ lists });
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -54,24 +53,22 @@ export const useListStore = create<ListState>()(
         }
       },
 
-      createList: async (name: string, budget: number) => {
+      createList: async (name: string, budget: number, userId: string) => {
         set({ isLoading: true, error: null });
         try {
-          const { data: userData, error: userError } = await supabase.auth.getUser();
-          if (userError) throw userError;
+          const id = crypto.randomUUID();
+          const now = new Date().toISOString();
+          const newList: ShoppingList = {
+            id,
+            name,
+            budget,
+            user_id: userId,
+            created_at: now,
+            updated_at: now,
+          };
           
-          const { data, error } = await supabase
-            .from('shopping_lists')
-            .insert([{ 
-              name, 
-              budget,
-              user_id: userData.user.id 
-            }])
-            .select()
-            .single();
-
-          if (error) throw error;
-          set((state) => ({ lists: [data, ...state.lists] }));
+          await db.shoppingLists.add(newList);
+          set((state) => ({ lists: [newList, ...state.lists] }));
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -82,12 +79,9 @@ export const useListStore = create<ListState>()(
       deleteList: async (id: string) => {
         set({ isLoading: true, error: null });
         try {
-          const { error } = await supabase
-            .from('shopping_lists')
-            .delete()
-            .eq('id', id);
-
-          if (error) throw error;
+          await db.shoppingLists.delete(id);
+          await db.listItems.where('list_id').equals(id).delete();
+          
           set((state) => ({
             lists: state.lists.filter((list) => list.id !== id),
             currentList: state.currentList?.id === id ? null : state.currentList,
@@ -109,22 +103,20 @@ export const useListStore = create<ListState>()(
       fetchItems: async (listId: string) => {
         set({ isLoading: true, error: null });
         try {
-          const { data, error } = await supabase
-            .from('list_items')
-            .select('*')
-            .eq('list_id', listId)
-            .order('created_at', { ascending: true });
-
-          if (error) throw error;
-          set({ items: data || [] });
+          const items = await db.listItems
+            .where('list_id')
+            .equals(listId)
+            .sortBy('created_at');
+          
+          set({ items });
           
           // Update stats
           const stats = {
-            total: data?.length || 0,
-            completed: data?.filter((item) => item.completed).length || 0,
-            active: data?.filter((item) => !item.completed).length || 0,
-            totalSpent: data?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0,
-            remainingBudget: (get().currentList?.budget || 0) - (data?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0),
+            total: items.length,
+            completed: items.filter((item) => item.completed).length,
+            active: items.filter((item) => !item.completed).length,
+            totalSpent: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+            remainingBudget: (get().currentList?.budget || 0) - items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
           };
           set({ stats });
         } catch (error) {
@@ -137,14 +129,18 @@ export const useListStore = create<ListState>()(
       addItem: async (item) => {
         set({ isLoading: true, error: null });
         try {
-          const { data, error } = await supabase
-            .from('list_items')
-            .insert([item])
-            .select()
-            .single();
-
-          if (error) throw error;
-          set((state) => ({ items: [...state.items, data] }));
+          const id = crypto.randomUUID();
+          const now = new Date().toISOString();
+          const newItem: ListItem = {
+            id,
+            ...item,
+            completed: false,
+            created_at: now,
+            updated_at: now,
+          };
+          
+          await db.listItems.add(newItem);
+          set((state) => ({ items: [...state.items, newItem] }));
           await get().fetchItems(item.list_id);
         } catch (error) {
           set({ error: (error as Error).message });
@@ -156,18 +152,16 @@ export const useListStore = create<ListState>()(
       updateItem: async (id: string, updates: Partial<ListItem>) => {
         set({ isLoading: true, error: null });
         try {
-          const { data, error } = await supabase
-            .from('list_items')
-            .update(updates)
-            .eq('id', id)
-            .select()
-            .single();
-
-          if (error) throw error;
+          const now = new Date().toISOString();
+          await db.listItems.update(id, { ...updates, updated_at: now });
+          
+          const updatedItem = await db.listItems.get(id);
+          if (!updatedItem) throw new Error('Item not found');
+          
           set((state) => ({
-            items: state.items.map((item) => (item.id === id ? data : item)),
+            items: state.items.map((item) => (item.id === id ? updatedItem : item)),
           }));
-          await get().fetchItems(data.list_id);
+          await get().fetchItems(updatedItem.list_id);
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -178,12 +172,8 @@ export const useListStore = create<ListState>()(
       deleteItem: async (id: string) => {
         set({ isLoading: true, error: null });
         try {
-          const { error } = await supabase
-            .from('list_items')
-            .delete()
-            .eq('id', id);
-
-          if (error) throw error;
+          await db.listItems.delete(id);
+          
           set((state) => ({
             items: state.items.filter((item) => item.id !== id),
           }));
@@ -225,11 +215,11 @@ export const useListStore = create<ListState>()(
 
           // Import lists
           for (const list of data.lists) {
-            await get().createList(list.name, list.budget);
+            await get().createList(list.name, list.budget, list.user_id);
           }
 
           // Refresh lists
-          await get().fetchLists();
+          await get().fetchLists(data.lists[0].user_id);
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {

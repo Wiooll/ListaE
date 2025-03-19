@@ -27,7 +27,7 @@ export default function Dashboard() {
       navigate('/');
       return;
     }
-    fetchLists();
+    fetchLists(currentUser.uid);
   }, [currentUser, navigate, fetchLists]);
 
   const handleLogout = async () => {
@@ -41,8 +41,10 @@ export default function Dashboard() {
 
   const handleCreateList = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
+    
     try {
-      await createList(listName, parseFloat(budget));
+      await createList(listName, parseFloat(budget), currentUser.uid);
       setIsModalOpen(false);
       setListName('');
       setBudget('');

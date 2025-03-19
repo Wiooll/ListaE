@@ -14,6 +14,8 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: 'theme-storage',
+      partialize: (state) => ({ theme: state.theme }),
+      version: 1,
     }
   )
 );

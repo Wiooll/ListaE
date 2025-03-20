@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { db } from '../lib/db';
+import { supabase } from '../lib/supabase';
 import type { ShoppingList, ListItem, ListStats } from '../types';
 
 interface ListState {
@@ -16,14 +16,12 @@ interface ListState {
   deleteList: (id: string) => Promise<void>;
   setCurrentList: (list: ShoppingList | null) => void;
   fetchItems: (listId: string) => Promise<void>;
-  addItem: (item: Omit<ListItem, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  addItem: (item: Omit<ListItem, 'id' | 'created_at' | 'updated_at' | 'completed'>) => Promise<void>;
   updateItem: (id: string, updates: Partial<ListItem>) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   toggleItemComplete: (id: string) => Promise<void>;
   reorderItems: (items: ListItem[]) => Promise<void>;
   setFilter: (filter: 'all' | 'active' | 'completed') => void;
-  exportData: () => string;
-  importData: (jsonData: string) => Promise<void>;
 }
 
 export const useListStore = create<ListState>()(
@@ -40,12 +38,14 @@ export const useListStore = create<ListState>()(
       fetchLists: async (userId: string) => {
         set({ isLoading: true, error: null });
         try {
-          const lists = await db.shoppingLists
-            .where('user_id')
-            .equals(userId)
-            .reverse()
-            .sortBy('created_at');
-          set({ lists });
+          const { data, error } = await supabase
+            .from('shopping_lists')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+          set({ lists: data || [] });
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -56,19 +56,14 @@ export const useListStore = create<ListState>()(
       createList: async (name: string, budget: number, userId: string) => {
         set({ isLoading: true, error: null });
         try {
-          const id = crypto.randomUUID();
-          const now = new Date().toISOString();
-          const newList: ShoppingList = {
-            id,
-            name,
-            budget,
-            user_id: userId,
-            created_at: now,
-            updated_at: now,
-          };
-          
-          await db.shoppingLists.add(newList);
-          set((state) => ({ lists: [newList, ...state.lists] }));
+          const { data, error } = await supabase
+            .from('shopping_lists')
+            .insert([{ name, budget, user_id: userId }])
+            .select()
+            .single();
+
+          if (error) throw error;
+          set((state) => ({ lists: [data, ...state.lists] }));
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -79,9 +74,12 @@ export const useListStore = create<ListState>()(
       deleteList: async (id: string) => {
         set({ isLoading: true, error: null });
         try {
-          await db.shoppingLists.delete(id);
-          await db.listItems.where('list_id').equals(id).delete();
-          
+          const { error } = await supabase
+            .from('shopping_lists')
+            .delete()
+            .eq('id', id);
+
+          if (error) throw error;
           set((state) => ({
             lists: state.lists.filter((list) => list.id !== id),
             currentList: state.currentList?.id === id ? null : state.currentList,
@@ -103,14 +101,17 @@ export const useListStore = create<ListState>()(
       fetchItems: async (listId: string) => {
         set({ isLoading: true, error: null });
         try {
-          const items = await db.listItems
-            .where('list_id')
-            .equals(listId)
-            .sortBy('created_at');
-          
-          set({ items });
-          
+          const { data, error } = await supabase
+            .from('list_items')
+            .select('*')
+            .eq('list_id', listId)
+            .order('created_at', { ascending: true });
+
+          if (error) throw error;
+          set({ items: data || [] });
+
           // Update stats
+          const items = data || [];
           const stats = {
             total: items.length,
             completed: items.filter((item) => item.completed).length,
@@ -129,18 +130,14 @@ export const useListStore = create<ListState>()(
       addItem: async (item) => {
         set({ isLoading: true, error: null });
         try {
-          const id = crypto.randomUUID();
-          const now = new Date().toISOString();
-          const newItem: ListItem = {
-            id,
-            ...item,
-            completed: false,
-            created_at: now,
-            updated_at: now,
-          };
-          
-          await db.listItems.add(newItem);
-          set((state) => ({ items: [...state.items, newItem] }));
+          const { data, error } = await supabase
+            .from('list_items')
+            .insert([{ ...item, completed: false }])
+            .select()
+            .single();
+
+          if (error) throw error;
+          set((state) => ({ items: [...state.items, data] }));
           await get().fetchItems(item.list_id);
         } catch (error) {
           set({ error: (error as Error).message });
@@ -152,16 +149,18 @@ export const useListStore = create<ListState>()(
       updateItem: async (id: string, updates: Partial<ListItem>) => {
         set({ isLoading: true, error: null });
         try {
-          const now = new Date().toISOString();
-          await db.listItems.update(id, { ...updates, updated_at: now });
-          
-          const updatedItem = await db.listItems.get(id);
-          if (!updatedItem) throw new Error('Item not found');
-          
+          const { data, error } = await supabase
+            .from('list_items')
+            .update(updates)
+            .eq('id', id)
+            .select()
+            .single();
+
+          if (error) throw error;
           set((state) => ({
-            items: state.items.map((item) => (item.id === id ? updatedItem : item)),
+            items: state.items.map((item) => (item.id === id ? data : item)),
           }));
-          await get().fetchItems(updatedItem.list_id);
+          await get().fetchItems(data.list_id);
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -172,12 +171,19 @@ export const useListStore = create<ListState>()(
       deleteItem: async (id: string) => {
         set({ isLoading: true, error: null });
         try {
-          await db.listItems.delete(id);
-          
+          const item = get().items.find((i) => i.id === id);
+          const { error } = await supabase
+            .from('list_items')
+            .delete()
+            .eq('id', id);
+
+          if (error) throw error;
           set((state) => ({
             items: state.items.filter((item) => item.id !== id),
           }));
-          await get().fetchItems(get().currentList?.id || '');
+          if (item) {
+            await get().fetchItems(item.list_id);
+          }
         } catch (error) {
           set({ error: (error as Error).message });
         } finally {
@@ -198,33 +204,6 @@ export const useListStore = create<ListState>()(
 
       setFilter: (filter) => {
         set({ filter });
-      },
-
-      exportData: () => {
-        const { lists, items } = get();
-        return JSON.stringify({ lists, items }, null, 2);
-      },
-
-      importData: async (jsonData: string) => {
-        set({ isLoading: true, error: null });
-        try {
-          const data = JSON.parse(jsonData);
-          if (!data.lists || !Array.isArray(data.lists)) {
-            throw new Error('Invalid data format');
-          }
-
-          // Import lists
-          for (const list of data.lists) {
-            await get().createList(list.name, list.budget, list.user_id);
-          }
-
-          // Refresh lists
-          await get().fetchLists(data.lists[0].user_id);
-        } catch (error) {
-          set({ error: (error as Error).message });
-        } finally {
-          set({ isLoading: false });
-        }
       },
     }),
     {

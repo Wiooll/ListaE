@@ -14,16 +14,30 @@ export default function Signup() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     
+    // Reset error
+    setError('');
+
+    // Validate password length
+    if (password.length < 6) {
+      setError('A senha deve ter pelo menos 6 caracteres');
+      return;
+    }
+
+    // Validate password match
     if (password !== confirmPassword) {
-      return setError('As senhas não coincidem');
+      setError('As senhas não coincidem');
+      return;
     }
 
     try {
-      setError('');
       await signup(email, password);
       navigate('/');
-    } catch (err) {
-      setError('Falha ao criar conta. Tente novamente.');
+    } catch (err: any) {
+      if (err.message === 'Password should be at least 6 characters') {
+        setError('A senha deve ter pelo menos 6 caracteres');
+      } else {
+        setError('Falha ao criar conta. Tente novamente.');
+      }
     }
   }
 
@@ -66,6 +80,8 @@ export default function Signup() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
+                  minLength={6}
+                  placeholder="Mínimo de 6 caracteres"
                 />
               </div>
 
@@ -79,6 +95,8 @@ export default function Signup() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
+                  minLength={6}
+                  placeholder="Mínimo de 6 caracteres"
                 />
               </div>
               
@@ -91,9 +109,12 @@ export default function Signup() {
             </form>
             
             <div className="text-center mt-4">
-              <a href="/" className="text-blue-600 hover:text-blue-800">
+              <button 
+                onClick={() => navigate('/')} 
+                className="text-blue-600 hover:text-blue-800"
+              >
                 Já tem uma conta? Faça login!
-              </a>
+              </button>
             </div>
           </div>
           

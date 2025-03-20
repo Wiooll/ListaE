@@ -46,10 +46,12 @@ export default function ShoppingList() {
   );
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || !currentUser.id) {
+      console.log("Usuário não autenticado ou sem ID");
       navigate('/');
       return;
     }
+    
     if (id) {
       fetchItems(id);
     }
@@ -82,7 +84,6 @@ export default function ShoppingList() {
   };
 
   const handleUpdateItem = async (e: React.FormEvent) => {
-    console.log('handleUpdateItem chamado');
     e.preventDefault();
     if (!isEditing) return;
     
@@ -100,7 +101,6 @@ export default function ShoppingList() {
   };
 
   const handleDeleteItem = async (itemId: string) => {
-    console.log('handleDeleteItem chamado');
     if (window.confirm('Tem certeza que deseja excluir este item?')) {
       try {
         await deleteItem(itemId);

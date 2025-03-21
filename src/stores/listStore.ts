@@ -36,6 +36,12 @@ export const useListStore = create<ListState>()(
       error: null,
 
       fetchLists: async (userId: string) => {
+        // Return early if userId is undefined or null
+        if (!userId) {
+          set({ error: 'User ID is required', lists: [] });
+          return;
+        }
+
         set({ isLoading: true, error: null });
         try {
           const { data, error } = await supabase
@@ -47,13 +53,18 @@ export const useListStore = create<ListState>()(
           if (error) throw error;
           set({ lists: data || [] });
         } catch (error) {
-          set({ error: (error as Error).message });
+          set({ error: (error as Error).message, lists: [] });
         } finally {
           set({ isLoading: false });
         }
       },
 
       createList: async (name: string, budget: number, userId: string) => {
+        if (!userId) {
+          set({ error: 'User ID is required' });
+          return;
+        }
+
         set({ isLoading: true, error: null });
         try {
           const { data, error } = await supabase
@@ -99,6 +110,11 @@ export const useListStore = create<ListState>()(
       },
 
       fetchItems: async (listId: string) => {
+        if (!listId) {
+          set({ error: 'List ID is required', items: [] });
+          return;
+        }
+
         set({ isLoading: true, error: null });
         try {
           const { data, error } = await supabase
@@ -128,6 +144,11 @@ export const useListStore = create<ListState>()(
       },
 
       addItem: async (item) => {
+        if (!item.list_id) {
+          set({ error: 'List ID is required' });
+          return;
+        }
+
         set({ isLoading: true, error: null });
         try {
           const { data, error } = await supabase

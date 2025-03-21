@@ -46,12 +46,10 @@ export default function ShoppingList() {
   );
 
   useEffect(() => {
-    if (!currentUser || !currentUser.id) {
-      console.log("Usuário não autenticado ou sem ID");
+    if (!currentUser) {
       navigate('/');
       return;
     }
-    
     if (id) {
       fetchItems(id);
     }

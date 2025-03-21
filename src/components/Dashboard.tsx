@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [listName, setListName] = useState('');
   const [budget, setBudget] = useState('');
+  const [formError, setFormError] = useState('');
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   
@@ -27,7 +28,9 @@ export default function Dashboard() {
       navigate('/');
       return;
     }
-    fetchLists(currentUser.uid);
+    if (currentUser.id) {
+      fetchLists(currentUser.id);
+    }
   }, [currentUser, navigate, fetchLists]);
 
   const handleLogout = async () => {
@@ -41,15 +44,34 @@ export default function Dashboard() {
 
   const handleCreateList = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) return;
+    setFormError('');
+
+    if (!currentUser?.id) {
+      setFormError('Usuário não autenticado');
+      return;
+    }
+
+    if (!listName.trim()) {
+      setFormError('Nome da lista é obrigatório');
+      return;
+    }
+
+    const budgetValue = parseFloat(budget);
+    if (isNaN(budgetValue) || budgetValue < 0) {
+      setFormError('Orçamento inválido');
+      return;
+    }
     
     try {
-      await createList(listName, parseFloat(budget), currentUser.uid);
+      await createList(listName.trim(), budgetValue, currentUser.id);
       setIsModalOpen(false);
       setListName('');
       setBudget('');
+      // Refresh the lists after creation
+      fetchLists(currentUser.id);
     } catch (error) {
       console.error('Erro ao criar lista:', error);
+      setFormError('Erro ao criar lista. Tente novamente.');
     }
   };
 
@@ -57,6 +79,9 @@ export default function Dashboard() {
     if (window.confirm('Tem certeza que deseja excluir esta lista?')) {
       try {
         await deleteList(id);
+        if (currentUser?.id) {
+          fetchLists(currentUser.id);
+        }
       } catch (error) {
         console.error('Erro ao deletar lista:', error);
       }
@@ -191,12 +216,22 @@ export default function Dashboard() {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white">NOVA LISTA</h2>
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setFormError('');
+                  setListName('');
+                  setBudget('');
+                }}
                 className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 ×
               </button>
             </div>
+            {formError && (
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
+                {formError}
+              </div>
+            )}
             <form onSubmit={handleCreateList}>
               <div className="mb-6">
                 <label className="block text-gray-700 dark:text-gray-300 font-bold mb-2">

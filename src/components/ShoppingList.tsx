@@ -85,6 +85,11 @@ export default function ShoppingList() {
     e.preventDefault();
     if (!isEditing) return;
     
+    if (!editItem || !editItem.name || !editItem.quantity || !editItem.price) {
+      console.error('Erro ao atualizar item: editItem is null or invalid');
+      return;
+    }
+    
     try {
       await updateItem(isEditing, {
         name: editItem.name,
@@ -98,7 +103,12 @@ export default function ShoppingList() {
     }
   };
 
-  const handleDeleteItem = async (itemId: string) => {
+  const handleDeleteItem = async (itemId: string | null) => {
+    if (!itemId) {
+      console.error('Erro ao deletar item: itemId is null');
+      return;
+    }
+
     if (window.confirm('Tem certeza que deseja excluir este item?')) {
       try {
         await deleteItem(itemId);
@@ -290,14 +300,14 @@ export default function ShoppingList() {
                             required
                           />
                         </div>
-                        <div className="flex justify-end space-x-2">
+                        <div className="flex justify-end space-x-4">
                           <button
                             type="button"
                             onClick={() => {
                               setIsEditing(null);
                               setEditItem({ name: '', quantity: '', price: '' });
                             }}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
+                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300"
                           >
                             Cancelar
                           </button>
@@ -310,7 +320,7 @@ export default function ShoppingList() {
                         </div>
                       </form>
                     ) : (
-                      <SortableItem id={item.id}>
+                      <SortableItem id={item.id} key={item.id}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-4">
                             <input
@@ -338,13 +348,13 @@ export default function ShoppingList() {
                               }}
                               className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
                             >
-                              <Edit2 size={20} />
+                              <Edit2 size={30} />
                             </button>
                             <button
                               onClick={() => handleDeleteItem(item.id)}
                               className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
                             >
-                              <Trash2 size={20} />
+                              <Trash2 size={30} />
                             </button>
                           </div>
                         </div>
@@ -386,7 +396,7 @@ export default function ShoppingList() {
                   placeholder="Preço"
                   min="0"
                   step="0.01"
-                  required
+                  required               
                 />
               </div>
               <div className="flex justify-end">

@@ -168,21 +168,58 @@ export const useListStore = create<ListState>()(
       },
 
       updateItem: async (id: string, updates: Partial<ListItem>) => {
+        console.log('Iniciando atualização do item:', { id, updates });
         set({ isLoading: true, error: null });
         try {
+          // Primeiro, verifica se o item existe
+          const existingItem = get().items.find((i) => i.id === id);
+          if (!existingItem) {
+            console.error('Item não encontrado:', id);
+            throw new Error('Item não encontrado');
+          }
+
+          console.log('Item encontrado, tentando atualizar no Supabase:', existingItem);
+
+          // Faz a atualização no Supabase
           const { data, error } = await supabase
             .from('list_items')
-            .update(updates)
+            .update({
+              ...updates,
+              updated_at: new Date().toISOString()
+            })
             .eq('id', id)
             .select()
             .single();
 
-          if (error) throw error;
+          if (error) {
+            console.error('Erro do Supabase ao atualizar item:', error);
+            throw error;
+          }
+
+          if (!data) {
+            console.error('Nenhum dado retornado da atualização');
+            throw new Error('Nenhum dado retornado da atualização');
+          }
+
+          console.log('Item atualizado com sucesso:', data);
+
+          // Atualiza o estado local
           set((state) => ({
             items: state.items.map((item) => (item.id === id ? data : item)),
           }));
-          await get().fetchItems(data.list_id);
+
+          // Atualiza as estatísticas
+          const items = get().items;
+          const stats = {
+            total: items.length,
+            completed: items.filter((item) => item.completed).length,
+            active: items.filter((item) => !item.completed).length,
+            totalSpent: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+            remainingBudget: (get().currentList?.budget || 0) - items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+          };
+          set({ stats });
         } catch (error) {
+          console.error('Erro na função updateItem:', error);
           set({ error: (error as Error).message });
         } finally {
           set({ isLoading: false });
@@ -190,22 +227,48 @@ export const useListStore = create<ListState>()(
       },
 
       deleteItem: async (id: string) => {
+        console.log('Iniciando deleção do item:', id);
         set({ isLoading: true, error: null });
         try {
+          // Primeiro, verifica se o item existe
           const item = get().items.find((i) => i.id === id);
+          if (!item) {
+            console.error('Item não encontrado:', id);
+            throw new Error('Item não encontrado');
+          }
+
+          console.log('Item encontrado, tentando deletar do Supabase:', item);
+
+          // Faz a deleção no Supabase
           const { error } = await supabase
             .from('list_items')
             .delete()
             .eq('id', id);
 
-          if (error) throw error;
+          if (error) {
+            console.error('Erro do Supabase ao deletar item:', error);
+            throw error;
+          }
+
+          console.log('Item deletado com sucesso');
+
+          // Atualiza o estado local
           set((state) => ({
             items: state.items.filter((item) => item.id !== id),
           }));
-          if (item) {
-            await get().fetchItems(item.list_id);
-          }
+
+          // Atualiza as estatísticas
+          const items = get().items.filter((i) => i.id !== id);
+          const stats = {
+            total: items.length,
+            completed: items.filter((item) => item.completed).length,
+            active: items.filter((item) => !item.completed).length,
+            totalSpent: items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+            remainingBudget: (get().currentList?.budget || 0) - items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+          };
+          set({ stats });
         } catch (error) {
+          console.error('Erro na função deleteItem:', error);
           set({ error: (error as Error).message });
         } finally {
           set({ isLoading: false });

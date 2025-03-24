@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { Menu, ShoppingCart, Settings, LogOut, Trash2, Edit2 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useListStore } from '../stores/listStore';
 import { SortableItem } from './SortableItem';
+import { itemSchema, type ItemFormData } from '../lib/validations';
 
 interface ListItem {
   id: string;
@@ -18,11 +20,13 @@ interface ListItem {
 export default function ShoppingList() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditing, setIsEditing] = useState<string | null>(null);
-  const [editItem, setEditItem] = useState({ name: '', quantity: '', price: '' });
-  const [newItem, setNewItem] = useState({ name: '', quantity: '', price: '' });
+  const [editItem, setEditItem] = useState<ItemFormData>({ name: '', quantity: 0, price: 0 });
+  const [newItem, setNewItem] = useState<ItemFormData>({ name: '', quantity: 0, price: 0 });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const { id } = useParams();
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   
   const {
     items,
@@ -59,8 +63,23 @@ export default function ShoppingList() {
     try {
       await logout();
       navigate('/');
+      showToast('Logout realizado com sucesso!', 'success');
     } catch (error) {
+      showToast('Erro ao fazer logout', 'error');
       console.error('Falha ao fazer logout', error);
+    }
+  };
+
+  const validateForm = (data: ItemFormData) => {
+    try {
+      itemSchema.parse(data);
+      setErrors({});
+      return true;
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrors({ [error.name]: error.message });
+      }
+      return false;
     }
   };
 
@@ -68,52 +87,81 @@ export default function ShoppingList() {
     e.preventDefault();
     if (!id) return;
     
+    if (!validateForm(newItem)) {
+      showToast('Por favor, corrija os erros no formulário', 'error');
+      return;
+    }
+
     try {
       await addItem({
         list_id: id,
         name: newItem.name,
-        quantity: parseFloat(newItem.quantity),
-        price: parseFloat(newItem.price),
+        quantity: newItem.quantity,
+        price: newItem.price,
       });
-      setNewItem({ name: '', quantity: '', price: '' });
+      setNewItem({ name: '', quantity: 0, price: 0 });
+      showToast('Item adicionado com sucesso!', 'success');
     } catch (error) {
+      showToast('Erro ao adicionar item', 'error');
       console.error('Erro ao adicionar item:', error);
     }
   };
 
   const handleUpdateItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isEditing) return;
+    e.stopPropagation();
     
-    if (!editItem || !editItem.name || !editItem.quantity || !editItem.price) {
-      console.error('Erro ao atualizar item: editItem is null or invalid');
+    if (!isEditing) {
+      console.log('Nenhum item está sendo editado');
+      return;
+    }
+    
+    if (!validateForm(editItem)) {
+      console.log('Formulário inválido:', errors);
+      showToast('Por favor, corrija os erros no formulário', 'error');
       return;
     }
     
     try {
+      console.log('Tentando atualizar item:', { id: isEditing, data: editItem });
       await updateItem(isEditing, {
         name: editItem.name,
-        quantity: parseFloat(editItem.quantity),
-        price: parseFloat(editItem.price),
+        quantity: editItem.quantity,
+        price: editItem.price,
       });
+      console.log('Item atualizado com sucesso');
       setIsEditing(null);
-      setEditItem({ name: '', quantity: '', price: '' });
+      setEditItem({ name: '', quantity: 0, price: 0 });
+      showToast('Item atualizado com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao atualizar item:', error);
+      showToast(error instanceof Error ? error.message : 'Erro ao atualizar item', 'error');
     }
   };
 
   const handleDeleteItem = async (itemId: string | null) => {
     if (!itemId) {
-      console.error('Erro ao deletar item: itemId is null');
+      console.error('ID do item não fornecido');
+      showToast('ID do item não encontrado', 'error');
       return;
     }
 
-    if (window.confirm('Tem certeza que deseja excluir este item?')) {
+    const itemToDelete = items.find(item => item.id === itemId);
+    if (!itemToDelete) {
+      console.error('Item não encontrado:', itemId);
+      showToast('Item não encontrado', 'error');
+      return;
+    }
+
+    if (window.confirm(`Tem certeza que deseja excluir o item "${itemToDelete.name}"?`)) {
       try {
+        console.log('Tentando deletar item:', itemId);
         await deleteItem(itemId);
+        console.log('Item deletado com sucesso');
+        showToast('Item excluído com sucesso!', 'success');
       } catch (error) {
-        console.error('Erro ao deletar item:', error);
+        console.error('Erro ao excluir item:', error);
+        showToast(error instanceof Error ? error.message : 'Erro ao excluir item', 'error');
       }
     }
   };
@@ -125,7 +173,13 @@ export default function ShoppingList() {
       const oldIndex = items.findIndex((item) => item.id === active.id);
       const newIndex = items.findIndex((item) => item.id === over.id);
       const newItems = arrayMove(items, oldIndex, newIndex);
-      await reorderItems(newItems);
+      try {
+        await reorderItems(newItems);
+        showToast('Ordem dos itens atualizada!', 'success');
+      } catch (error) {
+        showToast('Erro ao reordenar itens', 'error');
+        console.error('Erro ao reordenar itens:', error);
+      }
     }
   };
 
@@ -134,6 +188,17 @@ export default function ShoppingList() {
     if (filter === 'completed') return item.completed;
     return true;
   });
+
+  // Adicionar useEffect para monitorar mudanças no estado de edição
+  useEffect(() => {
+    console.log('Estado de edição mudou:', isEditing);
+    console.log('Item sendo editado:', editItem);
+  }, [isEditing, editItem]);
+
+  // Adicionar useEffect para monitorar mudanças nos itens
+  useEffect(() => {
+    console.log('Lista de itens atualizada:', items);
+  }, [items]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
@@ -144,6 +209,7 @@ export default function ShoppingList() {
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              aria-label="Abrir menu"
             >
               <Menu size={24} />
             </button>
@@ -160,19 +226,27 @@ export default function ShoppingList() {
         className={`fixed inset-y-0 left-0 transform ${
           isMenuOpen ? 'translate-x-0' : '-translate-x-full'
         } w-64 bg-white dark:bg-gray-800 shadow-lg transition-transform duration-300 ease-in-out z-20`}
+        role="navigation"
+        aria-label="Menu principal"
       >
         <div className="p-6">
           <h2 className="text-2xl font-bold mb-8 text-gray-900 dark:text-white">ListaÊ</h2>
           <div className="space-y-4">
             <button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => {
+                navigate('/dashboard');
+                setIsMenuOpen(false);
+              }}
               className="flex items-center space-x-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 w-full"
             >
               <ShoppingCart size={20} />
               <span>Listas</span>
             </button>
             <button
-              onClick={() => navigate('/settings')}
+              onClick={() => {
+                navigate('/settings');
+                setIsMenuOpen(false);
+              }}
               className="flex items-center space-x-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 w-full"
             >
               <Settings size={20} />
@@ -254,162 +328,102 @@ export default function ShoppingList() {
           </div>
         </div>
 
-        {/* Items List */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={filteredItems}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {filteredItems.map((item) => (
-                  <div key={item.id} className="p-4">
-                    {isEditing === item.id ? (
-                      <form onSubmit={handleUpdateItem} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <input
-                            type="text"
-                            value={editItem.name}
-                            onChange={(e) => setEditItem({ ...editItem, name: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                            placeholder="Nome do item"
-                            required
-                          />
-                          <input
-                            type="number"
-                            value={editItem.quantity}
-                            onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                            placeholder="Quantidade"
-                            min="0"
-                            step="0.01"
-                            required
-                          />
-                          <input
-                            type="number"
-                            value={editItem.price}
-                            onChange={(e) => setEditItem({ ...editItem, price: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                            placeholder="Preço"
-                            min="0"
-                            step="0.01"
-                            required
-                          />
-                        </div>
-                        <div className="flex justify-end space-x-4">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsEditing(null);
-                              setEditItem({ name: '', quantity: '', price: '' });
-                            }}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            type="submit"
-                            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                          >
-                            Salvar
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <SortableItem id={item.id} key={item.id}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-4">
-                            <input
-                              type="checkbox"
-                              checked={item.completed}
-                              onChange={() => toggleItemComplete(item.id)}
-                              className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                            />
-                            <div className={`${item.completed ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>
-                              <p className="font-medium">{item.name}</p>
-                              <p className="text-sm text-gray-500 dark:text-gray-400">
-                                {item.quantity} x R$ {item.price.toFixed(2)} = R$ {(item.quantity * item.price).toFixed(2)}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={() => {
-                                setIsEditing(item.id);
-                                setEditItem({
-                                  name: item.name,
-                                  quantity: item.quantity.toString(),
-                                  price: item.price.toString(),
-                                });
-                              }}
-                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-                            >
-                              <Edit2 size={30} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteItem(item.id)}
-                              className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                            >
-                              <Trash2 size={30} />
-                            </button>
-                          </div>
-                        </div>
-                      </SortableItem>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-
-          {/* Add Item Form */}
-          <div className="p-4 bg-gray-50 dark:bg-gray-700">
-            <form onSubmit={handleAddItem} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <input
-                  type="text"
-                  value={newItem.name}
-                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="Nome do item"
-                  required
-                />
-                <input
-                  type="number"
-                  value={newItem.quantity}
-                  onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="Quantidade"
-                  min="0"
-                  step="0.01"
-                  required
-                />
-                <input
-                  type="number"
-                  value={newItem.price}
-                  onChange={(e) => setNewItem({ ...newItem, price: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="Preço"
-                  min="0"
-                  step="0.01"
-                  required               
-                />
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                >
-                  Adicionar Item
-                </button>
-              </div>
-            </form>
+        {/* Add Item Form */}
+        <form onSubmit={handleAddItem} className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Nome do Item
+              </label>
+              <input
+                type="text"
+                id="name"
+                value={newItem.name}
+                onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                aria-invalid={!!errors.name}
+                aria-describedby={errors.name ? 'name-error' : undefined}
+              />
+              {errors.name && (
+                <p id="name-error" className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">
+                  {errors.name}
+                </p>
+              )}
+            </div>
+            <div>
+              <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Quantidade
+              </label>
+              <input
+                type="number"
+                id="quantity"
+                value={newItem.quantity}
+                onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                aria-invalid={!!errors.quantity}
+                aria-describedby={errors.quantity ? 'quantity-error' : undefined}
+              />
+              {errors.quantity && (
+                <p id="quantity-error" className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">
+                  {errors.quantity}
+                </p>
+              )}
+            </div>
+            <div>
+              <label htmlFor="price" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Preço
+              </label>
+              <input
+                type="number"
+                id="price"
+                value={newItem.price}
+                onChange={(e) => setNewItem({ ...newItem, price: Number(e.target.value) })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                aria-invalid={!!errors.price}
+                aria-describedby={errors.price ? 'price-error' : undefined}
+              />
+              {errors.price && (
+                <p id="price-error" className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">
+                  {errors.price}
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+          <button
+            type="submit"
+            className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+          >
+            Adicionar Item
+          </button>
+        </form>
+
+        {/* Items List */}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={filteredItems.map(item => item.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="space-y-2">
+              {filteredItems.map((item) => (
+                <SortableItem
+                  key={item.id}
+                  item={item}
+                  isEditing={isEditing === item.id}
+                  editItem={editItem}
+                  onEditChange={setEditItem}
+                  onUpdate={handleUpdateItem}
+                  onDelete={handleDeleteItem}
+                  onToggleComplete={toggleItemComplete}
+                  setIsEditing={setIsEditing}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   );

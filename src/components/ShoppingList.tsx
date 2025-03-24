@@ -61,12 +61,15 @@ export default function ShoppingList() {
 
   const handleLogout = async () => {
     try {
+      setIsMenuOpen(false);
+      
       await logout();
+      
       navigate('/');
       showToast('Logout realizado com sucesso!', 'success');
     } catch (error) {
-      showToast('Erro ao fazer logout', 'error');
-      console.error('Falha ao fazer logout', error);
+      console.error('Erro ao fazer logout:', error);
+      showToast('Erro ao fazer logout. Por favor, tente novamente.', 'error');
     }
   };
 
@@ -262,6 +265,21 @@ export default function ShoppingList() {
           </div>
         </div>
       </div>
+
+      {/* Overlay para fechar o menu quando clicar fora */}
+      {isMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-10"
+          onClick={() => setIsMenuOpen(false)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setIsMenuOpen(false);
+            }
+          }}
+        />
+      )}
 
       {/* List Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
